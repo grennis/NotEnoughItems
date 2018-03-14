@@ -1,13 +1,14 @@
 package codechicken.nei.config;
 
-import codechicken.core.gui.GuiCCButton;
-import codechicken.core.gui.GuiScreenWidget;
-import codechicken.core.gui.GuiScrollSlot;
+import codechicken.lib.gui.GuiCCButton;
+import codechicken.lib.gui.GuiScreenWidget;
+import codechicken.lib.gui.GuiScrollSlot;
 import codechicken.lib.vec.Rectangle4i;
 import codechicken.nei.LayoutManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.item.ItemStack;
 
 import java.awt.*;
 import java.io.IOException;
@@ -20,8 +21,10 @@ import static codechicken.lib.gui.GuiDraw.*;
 import static net.minecraft.util.text.translation.I18n.translateToLocal;
 
 public class GuiOptionList extends GuiScreenWidget {
+
     public class OptionScrollSlot extends GuiScrollSlot {
-        public ArrayList<Option> options = new ArrayList<Option>();
+
+        public ArrayList<Option> options = new ArrayList<>();
 
         public OptionScrollSlot() {
             super(0, 0, 0, 0);
@@ -249,14 +252,14 @@ public class GuiOptionList extends GuiScreenWidget {
     }
 
     private void drawTooltip() {
-        List<String> tooltip = new LinkedList<String>();
+        List<String> tooltip = new LinkedList<>();
         Point mouse = getMousePosition();
         if (worldButton.pointInside(mouse.x, mouse.y)) {
             tooltip.addAll(Arrays.asList(translateToLocal("nei.options.global.tip." + (world ? "1" : "0")).split(":")));
         }
 
         tooltip = slot.handleTooltip(mouse.x, mouse.y, tooltip);
-        drawMultilineTip(mouse.x + 12, mouse.y - 12, tooltip);
+        drawMultiLineTip(ItemStack.EMPTY, mouse.x + 12, mouse.y - 12, tooltip);
     }
 
     @Override

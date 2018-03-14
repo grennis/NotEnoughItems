@@ -1,5 +1,6 @@
 package codechicken.nei.container;
 
+import codechicken.lib.util.ArrayUtils;
 import codechicken.nei.NEIClientConfig;
 import codechicken.nei.PlayerSave;
 import net.minecraft.entity.player.EntityPlayer;
@@ -9,6 +10,7 @@ import net.minecraft.util.text.ITextComponent;
 import net.minecraftforge.fml.relauncher.Side;
 
 public class ExtendedCreativeInv implements IInventory {
+
     PlayerSave playerSave;
     Side side;
 
@@ -20,6 +22,17 @@ public class ExtendedCreativeInv implements IInventory {
     @Override
     public int getSizeInventory() {
         return 54;
+    }
+
+    @Override
+    public boolean isEmpty() {
+        ItemStack[] items;
+        if (side.isClient()) {
+            items = NEIClientConfig.creativeInv;
+        } else {
+            items = playerSave.creativeInv;
+        }
+        return ArrayUtils.count(items, (stack -> !stack.isEmpty())) <= 0;
     }
 
     @Override
@@ -35,14 +48,14 @@ public class ExtendedCreativeInv implements IInventory {
         ItemStack item = getStackInSlot(slot);
 
         if (item != null) {
-            if (item.stackSize <= size) {
-                setInventorySlotContents(slot, null);
+            if (item.getCount() <= size) {
+                setInventorySlotContents(slot, ItemStack.EMPTY);
                 markDirty();
                 return item;
             }
             ItemStack itemstack1 = item.splitStack(size);
-            if (item.stackSize == 0) {
-                setInventorySlotContents(slot, null);
+            if (item.getCount() == 0) {
+                setInventorySlotContents(slot, ItemStack.EMPTY);
             }
 
             markDirty();
@@ -55,7 +68,7 @@ public class ExtendedCreativeInv implements IInventory {
     public ItemStack removeStackFromSlot(int slot) {
         synchronized (this) {
             ItemStack stack = getStackInSlot(slot);
-            setInventorySlotContents(slot, null);
+            setInventorySlotContents(slot, ItemStack.EMPTY);
             return stack;
         }
     }
@@ -84,7 +97,7 @@ public class ExtendedCreativeInv implements IInventory {
     }
 
     @Override
-    public boolean isUseableByPlayer(EntityPlayer var1) {
+    public boolean isUsableByPlayer(EntityPlayer var1) {
         return true;
     }
 

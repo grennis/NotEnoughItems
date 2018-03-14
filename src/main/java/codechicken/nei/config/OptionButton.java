@@ -8,8 +8,10 @@ import java.awt.*;
 import java.util.List;
 
 import static codechicken.lib.gui.GuiDraw.*;
+import static codechicken.lib.texture.TextureUtils.changeTexture;
 
 public abstract class OptionButton extends Option {
+
     protected static ResourceLocation guiTex = new ResourceLocation("textures/gui/widgets.png");
 
     public final String prefix;
@@ -109,9 +111,11 @@ public abstract class OptionButton extends Option {
 
     @Override
     public void mouseClicked(int x, int y, int button) {
-        if (pointInside(x, y)) {
-            if (onClick(button)) {
-                playClickSound();
+        if (isEnabled()) {
+            if (pointInside(x, y)) {
+                if (onClick(button)) {
+                    playClickSound();
+                }
             }
         }
     }

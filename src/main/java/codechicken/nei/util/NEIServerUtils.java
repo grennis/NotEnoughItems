@@ -1,16 +1,14 @@
 package codechicken.nei.util;
 
-import codechicken.lib.util.CommonUtils;
 import codechicken.lib.inventory.InventoryRange;
 import codechicken.lib.inventory.InventoryUtils;
 import codechicken.lib.packet.PacketCustom;
 import codechicken.lib.util.ServerUtils;
-import codechicken.nei.ClientHandler;
-import codechicken.nei.NEIActions;
 import codechicken.nei.NEIServerConfig;
 import codechicken.nei.PlayerSave;
 import codechicken.nei.container.ContainerCreativeInv;
 import codechicken.nei.network.NEIServerPacketHandler;
+import codechicken.nei.widget.action.NEIActions;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.enchantment.Enchantment;
 import net.minecraft.entity.player.EntityPlayer;
@@ -30,14 +28,17 @@ import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraftforge.oredict.OreDictionary;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.zip.ZipException;
 
 public class NEIServerUtils {
+
     public static boolean isRaining(World world) {
         return world.getWorldInfo().isRaining();
     }
@@ -60,6 +61,7 @@ public class NEIServerUtils {
         player.heal(20);
         player.getFoodStats().addStats(20, 1);
         player.extinguish();
+        player.clearActivePotions();
     }
 
     public static long getTime(World world) {
@@ -90,13 +92,13 @@ public class NEIServerUtils {
         }
     }
 
-    @SuppressWarnings("unchecked")
+    @SuppressWarnings ("unchecked")
     public static void deleteAllItems(EntityPlayerMP player) {
         for (Slot slot : player.openContainer.inventorySlots) {
-            slot.putStack(null);
+            slot.putStack(ItemStack.EMPTY);
         }
 
-        player.updateCraftingInventory(player.openContainer, player.openContainer.getInventory());
+        player.sendAllContents(player.openContainer, player.openContainer.getInventory());
     }
 
     public static void setHourForward(World world, int hour, boolean notify) {
@@ -130,14 +132,14 @@ public class NEIServerUtils {
         notice.getStyle().setColor(TextFormatting.GRAY).setItalic(true);
 
         if (NEIServerConfig.canPlayerPerformAction("CONSOLE", permission)) {
-            ServerUtils.mc().addChatMessage(notice);
+            ServerUtils.mc().sendMessage(notice);
         }
 
         for (EntityPlayer p : ServerUtils.getPlayers()) {
             if (p == sender) {
-                p.addChatComponentMessage(msg);
+                p.sendMessage(msg);
             } else if (NEIServerConfig.canPlayerPerformAction(p.getName(), permission)) {
-                p.addChatComponentMessage(notice);
+                p.sendMessage(notice);
             }
         }
     }
@@ -148,10 +150,7 @@ public class NEIServerUtils {
      * @return whether the two items are the same in terms of damage and itemID.
      */
     public static boolean areStacksSameType(ItemStack stack1, ItemStack stack2) {
-        return stack1 != null && stack2 != null &&
-                (stack1.getItem() == stack2.getItem() &&
-                        (!stack2.getHasSubtypes() || stack2.getItemDamage() == stack1.getItemDamage()) &&
-                        ItemStack.areItemStackTagsEqual(stack2, stack1));
+        return stack1 != null && stack2 != null && (stack1.getItem() == stack2.getItem() && (!stack2.getHasSubtypes() || stack2.getItemDamage() == stack1.getItemDamage()) && ItemStack.areItemStackTagsEqual(stack2, stack1));
     }
 
     /**
@@ -162,9 +161,7 @@ public class NEIServerUtils {
      * @return whether the two items are the same from the perspective of a crafting inventory.
      */
     public static boolean areStacksSameTypeCrafting(ItemStack stack1, ItemStack stack2) {
-        return stack1 != null && stack2 != null &&
-                stack1.getItem() == stack2.getItem() &&
-                (stack1.getItemDamage() == stack2.getItemDamage() || stack1.getItemDamage() == OreDictionary.WILDCARD_VALUE || stack2.getItemDamage() == OreDictionary.WILDCARD_VALUE || stack1.getItem().isDamageable());
+        return stack1 != null && stack2 != null && stack1.getItem() == stack2.getItem() && (stack1.getItemDamage() == stack2.getItemDamage() || stack1.getItemDamage() == OreDictionary.WILDCARD_VALUE || stack2.getItemDamage() == OreDictionary.WILDCARD_VALUE || stack1.getItem().isDamageable());
     }
 
     /**
@@ -178,14 +175,14 @@ public class NEIServerUtils {
         if (stack1 == stack2) {
             return 0;//catches both null
         }
-        if (stack1 == null || stack2 == null) {
-            return stack1 == null ? -1 : 1;//null stack goes first
+        if (stack1.isEmpty() || stack2.isEmpty()) {
+            return stack1.isEmpty() ? -1 : 1;//null stack goes first
         }
         if (stack1.getItem() != stack2.getItem()) {
             return Item.getIdFromItem(stack1.getItem()) - Item.getIdFromItem(stack2.getItem());
         }
-        if (stack1.stackSize != stack2.stackSize) {
-            return stack1.stackSize - stack2.stackSize;
+        if (stack1.getCount() != stack2.getCount()) {
+            return stack1.getCount() - stack2.getCount();
         }
         return stack1.getItemDamage() - stack2.getItemDamage();
     }
@@ -201,11 +198,11 @@ public class NEIServerUtils {
 
     public static void givePlayerItem(EntityPlayerMP player, ItemStack stack, boolean infinite, boolean doGive) {
         if (stack.getItem() == null) {
-            player.addChatComponentMessage(setColour(new TextComponentTranslation("nei.chat.give.noitem"), TextFormatting.WHITE));
+            player.sendMessage(setColour(new TextComponentTranslation("nei.chat.give.noitem"), TextFormatting.WHITE));
             return;
         }
 
-        int given = stack.stackSize;
+        int given = stack.getCount();
         if (doGive) {
             if (infinite) {
                 player.inventory.addItemStackToInventory(stack);
@@ -219,33 +216,33 @@ public class NEIServerUtils {
     }
 
     public static ItemStack copyStack(ItemStack itemstack, int i) {
-        if (itemstack == null) {
-            return null;
+        if (itemstack.isEmpty()) {
+            return ItemStack.EMPTY;
         }
 
-        itemstack.stackSize += i;
+        itemstack.grow(i);
         return itemstack.splitStack(i);
     }
 
     public static ItemStack copyStack(ItemStack itemstack) {
-        if (itemstack == null) {
-            return null;
+        if (itemstack.isEmpty()) {
+            return ItemStack.EMPTY;
         }
 
-        return copyStack(itemstack, itemstack.stackSize);
+        return copyStack(itemstack, itemstack.getCount());
     }
 
     public static void toggleMagnetMode(EntityPlayerMP player) {
-        PlayerSave playerSave = NEIServerConfig.forPlayer(player.getName());
-        playerSave.enableAction("magnet", !playerSave.isActionEnabled("magnet"));
+        PlayerSave playerSave = NEIServerConfig.getSaveForPlayer(player.getName());
+        playerSave.changeActionState("magnet", !playerSave.isActionEnabled("magnet"));
     }
 
     public static int getCreativeMode(EntityPlayerMP player) {
-        if (NEIServerConfig.forPlayer(player.getName()).isActionEnabled("creative+")) {
+        if (NEIServerConfig.getSaveForPlayer(player.getName()).isActionEnabled("creative+")) {
             return 2;
         } else if (player.interactionManager.isCreative()) {
             return 1;
-        } else if (player.interactionManager.getGameType().isAdventure()) {
+        } else if (player.interactionManager.getGameType().hasLimitedInteractions()) {
             return 3;
         } else {
             return 0;
@@ -254,25 +251,24 @@ public class NEIServerUtils {
 
     public static GameType getGameType(int mode) {
         switch (mode) {
-        case 0:
-            return GameType.SURVIVAL;
-        case 1:
-        case 2:
-            return GameType.CREATIVE;
-        case 3:
-            return GameType.ADVENTURE;
+            case 0:
+                return GameType.SURVIVAL;
+            case 1:
+            case 2:
+                return GameType.CREATIVE;
+            case 3:
+                return GameType.ADVENTURE;
         }
         return null;
     }
 
     public static void setGamemode(EntityPlayerMP player, int mode) {
-        if (mode < 0 || mode >= NEIActions.gameModes.length ||
-                NEIActions.nameActionMap.containsKey(NEIActions.gameModes[mode]) && !NEIServerConfig.canPlayerPerformAction(player.getName(), NEIActions.gameModes[mode])) {
+        if (mode < 0 || mode >= NEIActions.gameModes.length || NEIActions.nameActionMap.containsKey(NEIActions.gameModes[mode]) && !NEIServerConfig.canPlayerPerformAction(player.getName(), NEIActions.gameModes[mode])) {
             return;
         }
 
         //creative+
-        NEIServerConfig.forPlayer(player.getName()).enableAction("creative+", mode == 2);
+        NEIServerConfig.getSaveForPlayer(player.getName()).changeActionState("creative+", mode == 2);
         if (mode == 2 && !(player.openContainer instanceof ContainerCreativeInv))//open the container immediately for the client
         {
             NEIServerPacketHandler.processCreativeInv(player, true);
@@ -283,7 +279,7 @@ public class NEIServerUtils {
 
         //tell the client to change it
         new PacketCustom(NEIServerPacketHandler.channel, 14).writeByte(mode).sendToPlayer(player);
-        player.addChatMessage(new TextComponentTranslation("nei.chat.gamemode." + mode));
+        player.sendMessage(new TextComponentTranslation("nei.chat.gamemode." + mode));
     }
 
     public static void cycleCreativeInv(EntityPlayerMP player, int steps) {
@@ -291,13 +287,14 @@ public class NEIServerUtils {
 
         //top down [row][col]
         ItemStack[][] slots = new ItemStack[10][9];
-        PlayerSave playerSave = NEIServerConfig.forPlayer(player.getName());
+        PlayerSave playerSave = NEIServerConfig.getSaveForPlayer(player.getName());
 
         //get
-        System.arraycopy(inventory.mainInventory, 0, slots[9], 0, 9);
+        ItemStack[] mainInventory = inventory.mainInventory.toArray(new ItemStack[inventory.mainInventory.size()]);
+        System.arraycopy(mainInventory, 0, slots[9], 0, 9);
 
         for (int row = 0; row < 3; row++) {
-            System.arraycopy(inventory.mainInventory, (row + 1) * 9, slots[row + 6], 0, 9);
+            System.arraycopy(mainInventory, (row + 1) * 9, slots[row + 6], 0, 9);
         }
 
         for (int row = 0; row < 6; row++) {
@@ -311,10 +308,10 @@ public class NEIServerUtils {
             newslots[(row + steps + 10) % 10] = slots[row];
         }
 
-        System.arraycopy(newslots[9], 0, inventory.mainInventory, 0, 9);
+        System.arraycopy(newslots[9], 0, inventory.mainInventory.toArray(), 0, 9);
 
         for (int row = 0; row < 3; row++) {
-            System.arraycopy(newslots[row + 6], 0, inventory.mainInventory, (row + 1) * 9, 9);
+            System.arraycopy(newslots[row + 6], 0, inventory.mainInventory.toArray(), (row + 1) * 9, 9);
         }
 
         for (int row = 0; row < 6; row++) {
@@ -325,8 +322,8 @@ public class NEIServerUtils {
     }
 
     public static List<int[]> getEnchantments(ItemStack itemstack) {
-        ArrayList<int[]> arraylist = new ArrayList<int[]>();
-        if (itemstack != null) {
+        ArrayList<int[]> arraylist = new ArrayList<>();
+        if (!itemstack.isEmpty()) {
             NBTTagList nbttaglist = itemstack.getEnchantmentTagList();
             if (nbttaglist != null) {
                 for (int i = 0; i < nbttaglist.tagCount(); i++) {
@@ -362,35 +359,12 @@ public class NEIServerUtils {
 
     public static boolean doesEnchantmentConflict(List<int[]> enchantments, Enchantment enchantment) {
         for (int[] ai : enchantments) {
-            if (!enchantment.canApplyTogether(Enchantment.getEnchantmentByID(ai[0]))) {
+            if (!enchantment.isCompatibleWith(Enchantment.getEnchantmentByID(ai[0]))) {
                 return true;
             }
         }
 
         return false;
-    }
-
-    public static RuntimeException throwCME(String msg) {
-        if (CommonUtils.isClient()) {
-            return ClientHandler.throwCME(msg);
-        }
-
-        throw new RuntimeException(msg);
-    }
-
-    @SuppressWarnings("unchecked")
-    public static ItemStack[] extractRecipeItems(Object obj) {
-        if (obj instanceof ItemStack) {
-            return new ItemStack[] { (ItemStack) obj };
-        }
-        if (obj instanceof ItemStack[]) {
-            return (ItemStack[]) obj;
-        }
-        if (obj instanceof List) {
-            return ((List<ItemStack>) obj).toArray(new ItemStack[0]);
-        }
-
-        throw new ClassCastException("not an ItemStack, ItemStack[] or List<ItemStack?");
     }
 
     public static List<Integer> getRange(final int start, final int end) {
@@ -405,27 +379,6 @@ public class NEIServerUtils {
                 return end - start;
             }
         };
-    }
-
-    public static StringBuilder fixTrailingCommaList(StringBuilder sb) {
-        if (sb.charAt(sb.length() - 1) == ',') {
-            sb.deleteCharAt(sb.length() - 1);
-        }
-        return sb;
-    }
-
-    public static void logOnce(Throwable t, Set<String> stackTraces, String message) {
-        logOnce(t, stackTraces, message, "");
-    }
-
-    public static void logOnce(Throwable t, Set<String> stackTraces, String message, String identifier) {
-        StringWriter sw = new StringWriter();
-        t.printStackTrace(new PrintWriter(sw));
-        String stackTrace = identifier + sw.toString();
-        if (!stackTraces.contains(stackTrace)) {
-            LogHelper.errorError(message, t);
-            stackTraces.add(stackTrace);
-        }
     }
 
     public static NBTTagCompound readNBT(File file) throws IOException {

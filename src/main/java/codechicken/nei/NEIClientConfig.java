@@ -1,33 +1,33 @@
 package codechicken.nei;
 
-import codechicken.core.*;
-import codechicken.lib.asm.discovery.ClassDiscoverer;
-import codechicken.lib.asm.discovery.IStringMatcher;
 import codechicken.lib.config.ConfigFile;
 import codechicken.lib.config.ConfigTag;
 import codechicken.lib.config.ConfigTagParent;
+import codechicken.lib.util.ArrayUtils;
 import codechicken.lib.util.ClientUtils;
 import codechicken.lib.util.CommonUtils;
 import codechicken.nei.api.*;
-import codechicken.nei.api.layout.LayoutStyle;
 import codechicken.nei.config.*;
+import codechicken.nei.jei.EnumItemBrowser;
 import codechicken.nei.jei.JEIIntegrationManager;
-import codechicken.nei.jei.gui.SearchBoxButton;
-import codechicken.nei.recipe.RecipeInfo;
+import codechicken.nei.jei.gui.ItemBrowserButton;
+import codechicken.nei.layout.LayoutStyle;
+import codechicken.nei.util.ItemStackSet;
 import codechicken.nei.util.LogHelper;
 import codechicken.nei.util.NEIClientUtils;
-import codechicken.obfuscator.ObfuscationRun;
+import codechicken.nei.widget.SubsetWidget;
+import codechicken.nei.widget.action.NEIActions;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
-import net.minecraft.world.World;
 import net.minecraft.world.storage.WorldSummary;
-import org.lwjgl.input.Keyboard;
+import org.apache.commons.io.FileUtils;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -35,10 +35,9 @@ import java.util.List;
 import java.util.Map.Entry;
 
 public class NEIClientConfig {
-    private static boolean configLoaded;
-    private static boolean enabledOverride;
 
-    //public static Logger logger = LogManager.getLogger("NotEnoughItems");
+    private static boolean isEnabled;
+
     public static File configDir = new File(CommonUtils.getMinecraftDir(), "config/NEI/");
     public static ConfigSet global = new ConfigSet(new File("saves/NEI/client.dat"), new ConfigFile(new File(configDir, "client.cfg")));
     public static ConfigSet world;
@@ -47,16 +46,13 @@ public class NEIClientConfig {
     private static boolean statesSaved[] = new boolean[7];
 
     public static boolean hasSMPCounterpart;
-    public static HashSet<String> permissableActions = new HashSet<String>();
-    public static HashSet<String> disabledActions = new HashSet<String>();
-    public static HashSet<String> enabledActions = new HashSet<String>();
+    public static HashSet<String> permissibleActions = new HashSet<>();
+    public static HashSet<String> disabledActions = new HashSet<>();
+    public static HashSet<String> enabledActions = new HashSet<>();
 
-    public static ItemStackSet bannedBlocks = new ItemStackSet();
+    public static ItemStackSet bannedItems = new ItemStackSet();
 
     static {
-        if (global.config.getTag("checkUpdates").getBooleanValue(true)) {
-            CCUpdateChecker.updateCheck("NotEnoughItems");
-        }
         linkOptionList();
         setDefaults();
     }
@@ -77,7 +73,7 @@ public class NEIClientConfig {
         API.addOption(new OptionCycled("inventory.cheatmode", 3) {
             @Override
             public boolean optionValid(int index) {
-                return getLockedMode() == -1 || getLockedMode() == index && NEIInfo.isValidMode(index);
+                return getLockedMode() == -1 || getLockedMode() == index;
             }
         });
         checkCheatMode();
@@ -102,7 +98,7 @@ public class NEIClientConfig {
 
             @Override
             public boolean cycle() {
-                LinkedList<Integer> list = new LinkedList<Integer>();
+                LinkedList<Integer> list = new LinkedList<>();
                 for (Entry<Integer, LayoutStyle> entry : LayoutManager.layoutStyles.entrySet()) {
                     list.add(entry.getKey());
                 }
@@ -134,11 +130,6 @@ public class NEIClientConfig {
         tag.getTag("inventory.searchmode").getIntValue(1);
         API.addOption(new OptionCycled("inventory.searchmode", 3, true));
 
-        //tag.getTag("world.highlight_tips").getBooleanValue(false);
-        //tag.getTag("world.highlight_tips.x").getIntValue(5000);
-        //tag.getTag("world.highlight_tips.y").getIntValue(100);
-        //API.addOption(new OptionOpenGui("world.highlight_tips", GuiHighlightTips.class));
-
         tag.getTag("inventory.profileRecipes").getBooleanValue(false);
         API.addOption(new OptionToggleButton("inventory.profileRecipes", true));
 
@@ -155,9 +146,24 @@ public class NEIClientConfig {
 
         JEIIntegrationManager.initConfig(tag);
 
-        API.addOption(new SearchBoxButton("jei.searchBoxOwner"));
+        API.addOption(new ItemBrowserButton("jei.itemPanel") {
+            @Override
+            protected void setValue(EnumItemBrowser itemBrowser) {
+                JEIIntegrationManager.setItemPanelOwner(itemBrowser);
+            }
+        });
 
-        setDefaultKeyBindings();
+        API.addOption(new ItemBrowserButton("jei.searchBox") {
+            @Override
+            public boolean isEnabled() {
+                return JEIIntegrationManager.itemPanelOwner == EnumItemBrowser.JEI;
+            }
+
+            @Override
+            protected void setValue(EnumItemBrowser itemBrowser) {
+                JEIIntegrationManager.setSearchBoxOwner(itemBrowser);
+            }
+        });
     }
 
     private static void linkOptionList() {
@@ -184,28 +190,6 @@ public class NEIClientConfig {
         });
     }
 
-    private static void setDefaultKeyBindings() {
-        API.addKeyBind("gui.recipe", Keyboard.KEY_R);
-        API.addKeyBind("gui.usage", Keyboard.KEY_U);
-        API.addKeyBind("gui.back", Keyboard.KEY_BACK);
-        API.addKeyBind("gui.enchant", Keyboard.KEY_X);
-        API.addKeyBind("gui.potion", Keyboard.KEY_P);
-        API.addKeyBind("gui.prev", Keyboard.KEY_PRIOR);
-        API.addKeyBind("gui.next", Keyboard.KEY_NEXT);
-        API.addKeyBind("gui.hide", Keyboard.KEY_O);
-        API.addKeyBind("gui.search", Keyboard.KEY_F);
-        API.addKeyBind("world.chunkoverlay", Keyboard.KEY_F9);
-        API.addKeyBind("world.moboverlay", Keyboard.KEY_F7);
-        API.addKeyBind("world.highlight_tips", Keyboard.KEY_NUMPAD0);
-        API.addKeyBind("world.dawn", 0);
-        API.addKeyBind("world.noon", 0);
-        API.addKeyBind("world.dusk", 0);
-        API.addKeyBind("world.midnight", 0);
-        API.addKeyBind("world.rain", 0);
-        API.addKeyBind("world.heal", 0);
-        API.addKeyBind("world.creative", 0);
-    }
-
     public static OptionList getOptionList() {
         return OptionList.getOptionList("nei.options");
     }
@@ -213,7 +197,7 @@ public class NEIClientConfig {
     public static void loadWorld(String saveName) {
         setInternalEnabled(true);
         LogHelper.debug("Loading " + (Minecraft.getMinecraft().isSingleplayer() ? "Local" : "Remote") + " World");
-        bootNEI(ClientUtils.getWorld());
+        //ItemMobSpawner.loadSpawners(ClientUtils.getWorld());
 
         File saveDir = new File(CommonUtils.getMinecraftDir(), "saves/NEI/" + saveName);
         boolean newWorld = !saveDir.exists();
@@ -230,6 +214,7 @@ public class NEIClientConfig {
 
         setWorldDefaults();
         creativeInv = new ItemStack[54];
+        ArrayUtils.fillArray(creativeInv, ItemStack.EMPTY);
         LayoutManager.searchField.setText(getSearchExpression());
         LayoutManager.quantity.setText(Integer.toString(getItemQuantity()));
         SubsetWidget.loadHidden();
@@ -254,52 +239,6 @@ public class NEIClientConfig {
         }
 
         world.saveNBT();
-    }
-
-    public static int getKeyBinding(String string) {
-        return getSetting("keys." + string).getIntValue();
-    }
-
-    public static void setDefaultKeyBinding(String string, int key) {
-        getSetting("keys." + string).getIntValue(key);
-    }
-
-    public static void bootNEI(World world) {
-        if (configLoaded) {
-            return;
-        }
-
-        loadStates();
-        //ItemVisibilityHash.loadStates();
-        //vishash = new ItemVisibilityHash();
-        ItemInfo.load(world);
-        GuiInfo.load();
-        RecipeInfo.load();
-        LayoutManager.load();
-        NEIController.load();
-
-        configLoaded = true;
-
-        ClassDiscoverer classDiscoverer = new ClassDiscoverer(new IStringMatcher() {
-            public boolean matches(String test) {
-                return test.startsWith("NEI") && test.endsWith("Config.class");
-            }
-        }, IConfigureNEI.class);
-
-        classDiscoverer.findClasses();
-
-        for (Class<?> clazz : classDiscoverer.classes) {
-            try {
-                IConfigureNEI config = (IConfigureNEI) clazz.newInstance();
-                config.loadConfig();
-                NEIModContainer.plugins.add(config);
-                LogHelper.debug("Loaded " + clazz.getName());
-            } catch (Exception e) {
-                LogHelper.errorError("Failed to Load " + clazz.getName(), e);
-            }
-        }
-
-        ItemSorter.loadConfig();
     }
 
     public static void loadStates() {
@@ -329,11 +268,16 @@ public class NEIClientConfig {
     }
 
     public static boolean isHidden() {
-        return !enabledOverride || getBooleanSetting("inventory.hidden");
+        return !isEnabled || getBooleanSetting("inventory.hidden");
     }
 
+    /**
+     * Gets whether NEI is enabled.
+     *
+     * @return If NEI is enabled.
+     */
     public static boolean isEnabled() {
-        return enabledOverride && getBooleanSetting("inventory.widgetsenabled");
+        return isEnabled && getBooleanSetting("inventory.widgetsenabled");
     }
 
     public static void setEnabled(boolean flag) {
@@ -413,7 +357,12 @@ public class NEIClientConfig {
         }
     }
 
-    public static boolean getMagnetMode() {
+    /**
+     * Gets whether MagnetMode is enabled or not.
+     *
+     * @return If MagnetMode is enabled.
+     */
+    public static boolean isMagnetModeEnabled() {
         return enabledActions.contains("magnet");
     }
 
@@ -438,8 +387,8 @@ public class NEIClientConfig {
 
         NBTTagCompound statesave = global.nbt.getCompoundTag("save" + state);
         GuiContainer currentContainer = NEIClientUtils.getGuiContainer();
-        LinkedList<TaggedInventoryArea> saveAreas = new LinkedList<TaggedInventoryArea>();
-        saveAreas.add(new TaggedInventoryArea(Minecraft.getMinecraft().thePlayer.inventory));
+        LinkedList<TaggedInventoryArea> saveAreas = new LinkedList<>();
+        saveAreas.add(new TaggedInventoryArea(Minecraft.getMinecraft().player.inventory));
 
         for (INEIGuiHandler handler : GuiInfo.guiHandlers) {
             List<TaggedInventoryArea> areaList = handler.getInventoryAreas(currentContainer);
@@ -454,7 +403,7 @@ public class NEIClientConfig {
             }
 
             for (int slot : area.slots) {
-                NEIClientUtils.setSlotContents(slot, null, area.isContainer());
+                NEIClientUtils.setSlotContents(slot, ItemStack.EMPTY, area.isContainer());
             }
 
             NBTTagList areaTag = statesave.getTagList(area.tagName, 10);
@@ -465,7 +414,7 @@ public class NEIClientConfig {
                     continue;
                 }
 
-                NEIClientUtils.setSlotContents(slot, ItemStack.loadItemStackFromNBT(stacksave), area.isContainer());
+                NEIClientUtils.setSlotContents(slot, new ItemStack(stacksave), area.isContainer());
             }
         }
     }
@@ -473,8 +422,8 @@ public class NEIClientConfig {
     public static void saveState(int state) {
         NBTTagCompound statesave = global.nbt.getCompoundTag("save" + state);
         GuiContainer currentContainer = NEIClientUtils.getGuiContainer();
-        LinkedList<TaggedInventoryArea> saveAreas = new LinkedList<TaggedInventoryArea>();
-        saveAreas.add(new TaggedInventoryArea(Minecraft.getMinecraft().thePlayer.inventory));
+        LinkedList<TaggedInventoryArea> saveAreas = new LinkedList<>();
+        saveAreas.add(new TaggedInventoryArea(Minecraft.getMinecraft().player.inventory));
 
         for (INEIGuiHandler handler : GuiInfo.guiHandlers) {
             List<TaggedInventoryArea> areaList = handler.getInventoryAreas(currentContainer);
@@ -488,7 +437,7 @@ public class NEIClientConfig {
 
             for (int i : area.slots) {
                 ItemStack stack = area.getStackInSlot(i);
-                if (stack == null) {
+                if (stack.isEmpty()) {
                     continue;
                 }
                 NBTTagCompound stacksave = new NBTTagCompound();
@@ -510,14 +459,14 @@ public class NEIClientConfig {
 
     public static void setHasSMPCounterPart(boolean flag) {
         hasSMPCounterpart = flag;
-        permissableActions.clear();
-        bannedBlocks.clear();
+        permissibleActions.clear();
+        bannedItems.clear();
         disabledActions.clear();
         enabledActions.clear();
     }
 
     public static boolean canCheatItem(ItemStack stack) {
-        return canPerformAction("item") && !bannedBlocks.contains(stack);
+        return canPerformAction("item") && !bannedItems.contains(stack);
     }
 
     public static boolean canPerformAction(String name) {
@@ -531,7 +480,7 @@ public class NEIClientConfig {
 
         String base = NEIActions.base(name);
         if (hasSMPCounterpart) {
-            return permissableActions.contains(base);
+            return permissibleActions.contains(base);
         }
 
         if (NEIActions.smpRequired(name)) {
@@ -566,7 +515,7 @@ public class NEIClientConfig {
     }
 
     public static void setInternalEnabled(boolean b) {
-        enabledOverride = b;
+        isEnabled = b;
     }
 
     public static void reloadSaves() {
@@ -582,14 +531,18 @@ public class NEIClientConfig {
             LogHelper.errorError("Error loading saves", e);
             return;
         }
-        HashSet<String> saveFileNames = new HashSet<String>();
+        HashSet<String> saveFileNames = new HashSet<>();
         for (WorldSummary save : saves) {
             saveFileNames.add(save.getFileName());
         }
 
         for (File file : saveDir.listFiles()) {
             if (file.isDirectory() && !saveFileNames.contains(file.getName())) {
-                ObfuscationRun.deleteDir(file, true);
+                try {
+                    FileUtils.deleteDirectory(file);
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to delete folder: " + file, e);
+                }
             }
         }
     }

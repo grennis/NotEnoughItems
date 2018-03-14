@@ -19,14 +19,14 @@ public enum EnumItemBrowser {
     JEI {
         @Override
         public boolean isValid() {
-            return Loader.isModLoaded("JEI");
+            return Loader.isModLoaded("jei");
         }
     };
 
     public abstract boolean isValid();
 
     public static LinkedList<EnumItemBrowser> getValidBrowsers() {
-        LinkedList<EnumItemBrowser> validBrowsers = new LinkedList<EnumItemBrowser>();
+        LinkedList<EnumItemBrowser> validBrowsers = new LinkedList<>();
         for (EnumItemBrowser browser : values()) {
             if (browser.isValid()) {
                 validBrowsers.add(browser);

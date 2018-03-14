@@ -1,49 +1,61 @@
 package codechicken.nei;
 
 import codechicken.lib.gui.GuiDraw;
-import codechicken.nei.KeyManager.IKeyStateTracker;
-import codechicken.nei.api.*;
-import codechicken.nei.api.layout.LayoutStyle;
-import codechicken.nei.guihook.*;
+import codechicken.lib.vec.Rectangle4i;
+import codechicken.nei.api.API;
+import codechicken.nei.api.GuiInfo;
+import codechicken.nei.api.INEIGuiHandler;
+import codechicken.nei.config.KeyBindings;
+import codechicken.nei.gui.GuiExtendedCreativeInv;
+import codechicken.nei.guihook.IContainerDrawHandler;
+import codechicken.nei.guihook.IContainerObjectHandler;
+import codechicken.nei.guihook.IContainerTooltipHandler;
+import codechicken.nei.guihook.IInputHandler;
+import codechicken.nei.handler.KeyManager;
+import codechicken.nei.handler.KeyManager.IKeyStateTracker;
+import codechicken.nei.handler.NEIClientEventHandler;
+import codechicken.nei.layout.LayoutStyle;
 import codechicken.nei.layout.LayoutStyleMinecraft;
 import codechicken.nei.layout.LayoutStyleTMIOld;
 import codechicken.nei.network.NEIClientPacketHandler;
-import codechicken.nei.widget.Button;
-import codechicken.nei.widget.ItemPanel;
-import codechicken.nei.widget.Label;
-import codechicken.nei.widget.Widget;
+import codechicken.nei.util.ItemInfo;
+import codechicken.nei.util.ItemList;
+import codechicken.nei.util.LogHelper;
+import codechicken.nei.util.helper.GuiHelper;
+import codechicken.nei.widget.*;
+import codechicken.nei.widget.action.NEIActions;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.gui.inventory.GuiContainerCreative;
 import net.minecraft.client.renderer.GlStateManager;
-import net.minecraft.client.renderer.InventoryEffectRenderer;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import org.lwjgl.opengl.GL11;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.TreeSet;
+import java.util.*;
 
-import static codechicken.lib.gui.GuiDraw.*;
+import static codechicken.lib.gui.GuiDraw.drawRect;
+import static codechicken.lib.gui.GuiDraw.drawTexturedModalRect;
+import static codechicken.lib.texture.TextureUtils.changeTexture;
 import static codechicken.nei.NEIClientConfig.*;
 import static codechicken.nei.util.NEIClientUtils.*;
 
-public class LayoutManager implements IContainerInputHandler, IContainerTooltipHandler, IContainerDrawHandler, IContainerObjectHandler, IKeyStateTracker {
+public class LayoutManager implements IInputHandler, IContainerTooltipHandler, IContainerDrawHandler, IContainerObjectHandler, IKeyStateTracker {
+
     private static LayoutManager instance;
 
     private static Widget inputFocused;
     /**
      * Sorted bottom first
      */
-    private static TreeSet<Widget> drawWidgets;
+    private static TreeSet<Widget> drawWidgets = new TreeSet<>(new WidgetZOrder(false));
     /**
      * Sorted top first
      */
-    private static TreeSet<Widget> controlWidgets;
+    private static TreeSet<Widget> controlWidgets = new TreeSet<>(new WidgetZOrder(true));
 
     private static boolean showItemPanel;
 
@@ -70,9 +82,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     public static Button[] timeButtons = new Button[4];
     public static Button heal;
 
-    public static IRecipeOverlayRenderer overlayRenderer;
-
-    public static HashMap<Integer, LayoutStyle> layoutStyles = new HashMap<Integer, LayoutStyle>();
+    public static HashMap<Integer, LayoutStyle> layoutStyles = new HashMap<>();
 
     public static void load() {
         API.addLayoutStyle(0, new LayoutStyleMinecraft());
@@ -80,53 +90,37 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
 
         instance = new LayoutManager();
         KeyManager.trackers.add(instance);
-        GuiContainerManager.addInputHandler(instance);
-        GuiContainerManager.addTooltipHandler(instance);
-        GuiContainerManager.addDrawHandler(instance);
-        GuiContainerManager.addObjectHandler(instance);
+        NEIClientEventHandler.addInputHandler(instance);
+        NEIClientEventHandler.addTooltipHandler(instance);
+        NEIClientEventHandler.addDrawHandler(instance);
+        NEIClientEventHandler.addObjectHandler(instance);
         init();
     }
 
     @Override
-    public void onPreDraw(GuiContainer gui) {
-        if (!isHidden() && isEnabled() && gui instanceof InventoryEffectRenderer)//Reset the gui to the center of the screen, for potion effect offsets etc
-        {
-            gui.guiLeft = (gui.width - gui.xSize) / 2;
-            gui.guiTop = (gui.height - gui.ySize) / 2;
-
-            if (gui instanceof GuiContainerCreative && gui.buttonList.size() >= 2) {
-                GuiButton button1 = gui.buttonList.get(0);
-                GuiButton button2 = gui.buttonList.get(1);
-                button1.xPosition = gui.guiLeft;
-                button2.xPosition = gui.guiLeft + gui.xSize - 20;
-            }
-        }
-    }
-
-    @Override
-    public void onMouseClicked(GuiContainer gui, int mousex, int mousey, int button) {
+    public void onMouseClicked(GuiScreen gui, int mouseX, int mouseY, int button) {
         if (isHidden()) {
             return;
         }
 
         for (Widget widget : controlWidgets) {
-            widget.onGuiClick(mousex, mousey);
+            widget.onGuiClick(mouseX, mouseY);
         }
     }
 
     @Override
-    public boolean mouseClicked(GuiContainer gui, int mousex, int mousey, int button) {
+    public boolean mouseClicked(GuiScreen gui, int mouseX, int mouseY, int button) {
         if (isHidden()) {
             return false;
         }
 
         if (!isEnabled()) {
-            return options.contains(mousex, mousey) && options.handleClick(mousex, mousey, button);
+            return options.contains(mouseX, mouseY) && options.handleClick(mouseX, mouseY, button);
         }
 
         for (Widget widget : controlWidgets) {
-            widget.onGuiClick(mousex, mousey);
-            if (widget.contains(mousex, mousey) ? widget.handleClick(mousex, mousey, button) : widget.handleClickExt(mousex, mousey, button)) {
+            widget.onGuiClick(mouseX, mouseY);
+            if (widget.contains(mouseX, mouseY) ? widget.handleClick(mouseX, mouseY, button) : widget.handleClickExt(mouseX, mouseY, button)) {
                 return true;
             }
         }
@@ -147,7 +141,8 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
         return false;
     }
 
-    public boolean keyTyped(GuiContainer gui, char keyChar, int keyID) {
+    @Override
+    public boolean keyTyped(GuiScreen gui, char keyChar, int keyID) {
         if (isEnabled() && !isHidden()) {
             if (inputFocused != null) {
                 return inputFocused.handleKeyPress(keyID, keyChar);
@@ -164,12 +159,12 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     @Override
-    public void onKeyTyped(GuiContainer gui, char keyChar, int keyID) {
+    public void onKeyTyped(GuiScreen gui, char keyChar, int keyID) {
     }
 
     @Override
-    public boolean lastKeyTyped(GuiContainer gui, char keyChar, int keyID) {
-        if (keyID == getKeyBinding("gui.hide")) {
+    public boolean lastKeyTyped(GuiScreen gui, char keyChar, int keyID) {
+        if (KeyBindings.get("nei.options.keys.gui.hide").isActiveAndMatches(keyID)) {
             toggleBooleanSetting("inventory.hidden");
             return true;
         }
@@ -183,19 +178,20 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
         return false;
     }
 
-    public void onMouseUp(GuiContainer gui, int mx, int my, int button) {
+    @Override
+    public void onMouseUp(GuiScreen gui, int mouseX, int mouseY, int button) {
         if (!isHidden() && isEnabled()) {
             for (Widget widget : controlWidgets) {
-                widget.mouseUp(mx, my, button);
+                widget.mouseUp(mouseX, mouseY, button);
             }
         }
     }
 
     @Override
-    public void onMouseDragged(GuiContainer gui, int mx, int my, int button, long heldTime) {
+    public void onMouseDragged(GuiScreen gui, int mouseX, int mouseY, int button, long heldTime) {
         if (!isHidden() && isEnabled()) {
             for (Widget widget : controlWidgets) {
-                widget.mouseDragged(mx, my, button, heldTime);
+                widget.mouseDragged(mouseX, mouseY, button, heldTime);
             }
         }
     }
@@ -205,19 +201,20 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
         if (!isHidden() && isEnabled()) {
             for (Widget widget : controlWidgets) {
                 ItemStack stack = widget.getStackMouseOver(mousex, mousey);
-                if (stack != null) {
+                if (!stack.isEmpty()) {
                     return stack;
                 }
             }
         }
-        return null;
+        return ItemStack.EMPTY;
     }
 
+    @Override
     public void renderObjects(GuiContainer gui, int mousex, int mousey) {
         if (!isHidden()) {
             layout(gui);
             if (isEnabled()) {
-                getLayoutStyle().drawBackground(GuiContainerManager.getManager(gui));
+                getLayoutStyle().drawBackground(gui);
                 for (Widget widget : drawWidgets) {
                     widget.draw(mousex, mousey);
                 }
@@ -228,7 +225,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
             GlStateManager.enableLighting();
             GlStateManager.disableDepth();
         } else {
-         showItemPanel = false;
+            showItemPanel = false;
         }
     }
 
@@ -242,38 +239,31 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     @Override
-    public List<String> handleTooltip(GuiContainer gui, int mousex, int mousey, List<String> currenttip) {
-        if (!isHidden() && isEnabled() && GuiContainerManager.shouldShowTooltip(gui)) {
+    public void handleTooltip(GuiScreen gui, int mousex, int mousey, List<String> currenttip) {
+        if (!isHidden() && isEnabled() && GuiHelper.shouldShowTooltip(gui)) {
             for (Widget widget : controlWidgets) {
-                currenttip = widget.handleTooltip(mousex, mousey, currenttip);
+                widget.handleTooltip(mousex, mousey, currenttip);
             }
         }
-        return currenttip;
     }
 
     @Override
-    public List<String> handleItemDisplayName(GuiContainer gui, ItemStack stack, List<String> currenttip) {
-        String overridename = ItemInfo.getNameOverride(stack);
-        if (overridename != null) {
-            currenttip.set(0, overridename);
-        }
-
-        String mainname = currenttip.get(0);
-        if (showIDs()) {
-            mainname += " " + Item.getIdFromItem(stack.getItem());
-            if (stack.getItemDamage() != 0) {
-                mainname += ":" + stack.getItemDamage();
-            }
-
-            currenttip.set(0, mainname);
-        }
-
-        return currenttip;
-    }
-
-    @Override
-    public List<String> handleItemTooltip(GuiContainer gui, ItemStack itemstack, int mousex, int mousey, List<String> currenttip) {
-        return currenttip;
+    public void handleItemDisplayName(GuiScreen gui, ItemStack stack, List<String> currenttip) {
+        //TODO, Implement this in a cleaner way.
+//        String overridename = ItemInfo.getNameOverride(stack);
+//        if (overridename != null) {
+//            currenttip.set(0, overridename);
+//        }
+//
+//        String mainname = currenttip.get(0);
+//        if (showIDs()) {
+//            mainname += " " + Item.getIdFromItem(stack.getItem());
+//            if (stack.getItemDamage() != 0) {
+//                mainname += ":" + stack.getItemDamage();
+//            }
+//
+//            currenttip.set(0, mainname);
+//        }
     }
 
     public static void layout(GuiContainer gui) {
@@ -282,15 +272,15 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
             //showItemPanel = false;
             visiblity.showNEI = false;
         }
-        if (gui.height - gui.ySize <= 40) {
+        if (gui.height - gui.getYSize() <= 40) {
             visiblity.showSearchSection = false;
         }
-        if (gui.guiLeft - 4 < 76) {
+        if (gui.getGuiLeft() - 4 < 76) {
             visiblity.showWidgets = false;
         }
 
         for (INEIGuiHandler handler : GuiInfo.guiHandlers) {
-            handler.modifyVisiblity(gui, visiblity);
+            handler.modifyVisibility(gui, visiblity);
         }
 
         visiblity.translateDependancies();
@@ -329,11 +319,11 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
                 return false;
             }
 
-              @Override
-             public String getRenderLabel() {
-                 return translate("inventory.prev");
-             }
-         };
+            @Override
+            public String getRenderLabel() {
+                return translate("inventory.prev");
+            }
+        };
         next = new Button("Next") {
             public boolean onButtonPress(boolean rightclick) {
                 if (!rightclick) {
@@ -432,7 +422,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
                 }
 
                 ItemStack held = getHeldItem();
-                if (held != null) {
+                if (!held.isEmpty()) {
                     if (shiftKey()) {
                         deleteHeldItem();
                         deleteItemsOfType(held);
@@ -464,8 +454,8 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
 
             @Override
             public void postDraw(int mousex, int mousey) {
-                if (contains(mousex, mousey) && getHeldItem() != null && (state & 0x3) != 2) {
-                    GuiDraw.drawTip(mousex + 9, mousey, translate("inventory.delete." + (shiftKey() ? "all" : "one"), GuiContainerManager.itemDisplayNameShort(getHeldItem())));
+                if (contains(mousex, mousey) && !getHeldItem().isEmpty() && (state & 0x3) != 2) {
+                    GuiDraw.drawTip(mousex + 9, mousey, translate("inventory.delete." + (shiftKey() ? "all" : "one"), GuiHelper.itemDisplayNameShort(getHeldItem())));
                 }
             }
         };
@@ -483,7 +473,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
                 return translate("inventory.gamemode." + getNextGamemode());
             }
         };
-        gamemode.icons = new Image[3];
+        gamemode.icons = new Rectangle4i[3];
         rain = new Button() {
             @Override
             public boolean onButtonPress(boolean rightclick) {
@@ -595,7 +585,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
             }
         }
         if (hasSMPCounterPart()) {
-            NEIClientPacketHandler.sendSetPropertyDisabled(ident, disable);
+            NEIClientPacketHandler.sendActionDisableStateChange(ident, disable);
         }
 
         return true;
@@ -607,7 +597,6 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
             setInputFocused(null);
 
             ItemList.loadItems.restart();
-            overlayRenderer = null;
 
             getLayoutStyle().init();
             layout(gui);
@@ -637,65 +626,68 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     public static void updateWidgetVisiblities(GuiContainer gui, VisibilityData visiblity) {
-        drawWidgets = new TreeSet<Widget>(new WidgetZOrder(false));
-        controlWidgets = new TreeSet<Widget>(new WidgetZOrder(true));
+        Set<Widget> newWidgets = new HashSet<>();
 
         if (!visiblity.showNEI) {
             //showItemPanel = false;
             return;
         }
 
-        addWidget(options);
+        newWidgets.add(options);
         showItemPanel = visiblity.showItemPanel;
         if (visiblity.showItemPanel) {
-            addWidget(itemPanel);
-            addWidget(prev);
-            addWidget(next);
-            addWidget(pageLabel);
+            newWidgets.add(itemPanel);
+            newWidgets.add(prev);
+            newWidgets.add(next);
+            newWidgets.add(pageLabel);
             if (canPerformAction("item")) {
-                addWidget(more);
-                addWidget(less);
-                addWidget(quantity);
+                newWidgets.add(more);
+                newWidgets.add(less);
+                newWidgets.add(quantity);
             }
         }
 
         if (visiblity.showSearchSection) {
-            addWidget(dropDown);
-            addWidget(searchField);
+            newWidgets.add(dropDown);
+            newWidgets.add(searchField);
         }
 
         if (canPerformAction("item") && hasSMPCounterPart() && visiblity.showStateButtons) {
             for (int i = 0; i < 7; i++) {
-                addWidget(stateButtons[i]);
+                newWidgets.add(stateButtons[i]);
                 if (isStateSaved(i)) {
-                    addWidget(deleteButtons[i]);
+                    newWidgets.add(deleteButtons[i]);
                 }
             }
         }
         if (visiblity.showUtilityButtons) {
             if (canPerformAction("time")) {
-                for (int i = 0; i < 4; i++) {
-                    addWidget(timeButtons[i]);
-                }
+                newWidgets.addAll(Arrays.asList(timeButtons).subList(0, 4));
             }
             if (canPerformAction("rain")) {
-                addWidget(rain);
+                newWidgets.add(rain);
             }
             if (canPerformAction("heal")) {
-                addWidget(heal);
+                newWidgets.add(heal);
             }
             if (canPerformAction("magnet")) {
-                addWidget(magnet);
+                newWidgets.add(magnet);
             }
-            if (isValidGamemode("creative") ||
-                    isValidGamemode("creative+") ||
-                    isValidGamemode("adventure")) {
-                addWidget(gamemode);
+            if (isValidGamemode("creative") || isValidGamemode("creative+") || isValidGamemode("adventure")) {
+                newWidgets.add(gamemode);
             }
             if (canPerformAction("delete")) {
-                addWidget(delete);
+                newWidgets.add(delete);
             }
         }
+
+        TreeSet<Widget> newDrawWidgets = new TreeSet<>(new WidgetZOrder(false));
+        TreeSet<Widget> newControlWidgets = new TreeSet<>(new WidgetZOrder(true));
+        newDrawWidgets.addAll(newWidgets);
+        newControlWidgets.addAll(newWidgets);
+
+        drawWidgets = newDrawWidgets;
+        controlWidgets = newControlWidgets;
     }
 
     public static LayoutStyle getLayoutStyle(int id) {
@@ -710,6 +702,7 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
         return getLayoutStyle(NEIClientConfig.getLayoutStyle());
     }
 
+    @Deprecated//TODO, This is Un-Synchronized. We throw errors if we add widgets this way.
     private static void addWidget(Widget widget) {
         drawWidgets.add(widget);
         controlWidgets.add(widget);
@@ -731,13 +724,13 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     @Override
-    public boolean mouseScrolled(GuiContainer gui, int mousex, int mousey, int scrolled) {
+    public boolean mouseScrolled(GuiScreen gui, int mouseX, int mouseY, int scrolled) {
         if (isHidden() || !isEnabled()) {
             return false;
         }
 
         for (Widget widget : controlWidgets) {
-            if (widget.onMouseWheel(scrolled, mousex, mousey)) {
+            if (widget.onMouseWheel(scrolled, mouseX, mouseY)) {
                 return true;
             }
         }
@@ -746,12 +739,8 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     @Override
-    public void onMouseScrolled(GuiContainer gui, int mousex, int mousey, int scrolled) {
-    }
-
-    @Override
-    public boolean shouldShowTooltip(GuiContainer gui) {
-        return itemPanel.draggedStack == null;
+    public boolean shouldShowTooltip(GuiScreen gui) {
+        return itemPanel.draggedStack.isEmpty() && gui instanceof GuiContainer;
     }
 
     public static Widget getInputFocused() {
@@ -770,30 +759,25 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
     }
 
     @Override
-    public void renderSlotUnderlay(GuiContainer gui, Slot slot) {
-        if (overlayRenderer != null) {
-            overlayRenderer.renderOverlay(GuiContainerManager.getManager(gui), slot);
-        }
-    }
-
-    @Override
     public void renderSlotOverlay(GuiContainer window, Slot slot) {
         ItemStack item = slot.getStack();
         if (world.nbt.getBoolean("searchinventories") && (item == null ? !getSearchExpression().equals("") : !ItemList.getItemListFilter().matches(item))) {
             GlStateManager.disableLighting();
-            GlStateManager.translate(0, 0, 150);
-            drawRect(slot.xDisplayPosition, slot.yDisplayPosition, 16, 16, 0x80000000);
-            GlStateManager.translate(0, 0, -150);
+            //GlStateManager.depthFunc(GL11.GL_EQUAL);
+            GlStateManager.translate(0, 0, 350);
+            drawRect(slot.xPos, slot.yPos, 16, 16, 0x80000000);
+            GlStateManager.translate(0, 0, -350);
+            //GlStateManager.depthFunc(GL11.GL_LESS);
             GlStateManager.enableLighting();
         }
     }
 
-    public static void drawIcon(int x, int y, Image image) {
+    public static void drawIcon(int x, int y, Rectangle4i image) {
         changeTexture("nei:textures/nei_sprites.png");
         GlStateManager.color(1, 1, 1, 1);
         GlStateManager.enableBlend();
         GlStateManager.blendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
-        drawTexturedModalRect(x, y, image.x, image.y, image.width, image.height);
+        drawTexturedModalRect(x, y, image.x, image.y, image.w, image.h);
         GlStateManager.disableBlend();
     }
 
@@ -847,25 +831,25 @@ public class LayoutManager implements IContainerInputHandler, IContainerTooltipH
             return;
         }
 
-        if (KeyManager.keyStates.get("world.dawn").down) {
+        if (KeyBindings.get("nei.options.keys.world.dawn").isPressed()) {
             timeButtons[0].onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.noon").down) {
+        if (KeyBindings.get("nei.options.keys.world.noon").isPressed()) {
             timeButtons[1].onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.dusk").down) {
+        if (KeyBindings.get("nei.options.keys.world.dusk").isPressed()) {
             timeButtons[2].onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.midnight").down) {
+        if (KeyBindings.get("nei.options.keys.world.midnight").isPressed()) {
             timeButtons[3].onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.rain").down) {
+        if (KeyBindings.get("nei.options.keys.world.rain").isPressed()) {
             rain.onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.heal").down) {
+        if (KeyBindings.get("nei.options.keys.world.heal").isPressed()) {
             heal.onButtonPress(false);
         }
-        if (KeyManager.keyStates.get("world.creative").down) {
+        if (KeyBindings.get("nei.options.keys.world.creative").isPressed()) {
             gamemode.onButtonPress(false);
         }
     }

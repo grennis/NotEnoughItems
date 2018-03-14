@@ -16,7 +16,9 @@ import static codechicken.lib.gui.GuiDraw.drawStringC;
 import static codechicken.lib.gui.GuiDraw.getMousePosition;
 
 public class GuiItemSorter extends GuiOptionPane {
+
     public class SortItem {
+
         public double ya;
         public double y;
         public SortEntry e;
@@ -46,7 +48,7 @@ public class GuiItemSorter extends GuiOptionPane {
     }
 
     public Option opt;
-    public List<SortItem> slots = new ArrayList<SortItem>();
+    public List<SortItem> slots = new ArrayList<>();
     public List<SortEntry> list;
 
     boolean dragging;
@@ -125,7 +127,7 @@ public class GuiItemSorter extends GuiOptionPane {
                 list.add(nslot, dragged.e);
                 opt.getTag().setValue(ItemSorter.getSaveString(list));
                 if (opt.activeTag() == opt.getTag()) {
-                    ItemSorter.list = new ArrayList<SortEntry>(list);
+                    ItemSorter.list = new ArrayList<>(list);
                 }
             }
         }
